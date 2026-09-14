@@ -4,6 +4,8 @@
 
 Use Python 3.11 with working Tkinter. `python -m tkinter` should open a demonstration window. The release environment uses `actions/setup-python` on each native OS.
 
+Builds include the upstream license files and incorporated Python component notices. Windows builds additionally require the interpreter's complete `LICENSE.txt` under `sys.base_prefix`; this is copied into the executable and ZIP as `Python-Windows-runtime.txt`. Packaging verifies that every license was copied without alteration.
+
 Windows PowerShell:
 
 ```powershell
