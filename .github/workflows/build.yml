@@ -1,0 +1,90 @@
+name: Build and release
+
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            platform: windows-x64
+            architecture: x64
+          - runner: macos-14
+            platform: macos-arm64
+            architecture: arm64
+          - runner: macos-15-intel
+            platform: macos-x64
+            architecture: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+          architecture: ${{ matrix.architecture }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Test
+        run: python -m unittest discover -s tests -v
+      - name: Lint
+        run: python -m ruff check fleet_configurator main.py build.py scripts tests
+      - name: Build and launch packaged GUI
+        run: python build.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/release/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Verify all packages and checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, os
+          from fleet_configurator import __version__
+          assert os.environ['RELEASE_TAG'] == 'v' + __version__, 'Tag must match source version'
+          root = Path('release')
+          expected = {f'Codex-Fleet-Configurator-{p}.zip' for p in ('windows-x64', 'macos-arm64', 'macos-x64')}
+          assert {p.name for p in root.glob('*.zip')} == expected, 'Missing or unexpected package'
+          lines = []
+          for name in sorted(expected):
+              with (root/name).open('rb') as stream:
+                  digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+              line = f'{digest}  {name}\n'
+              assert (root/(name+'.sha256')).read_text(encoding='utf-8') == line
+              lines.append(line)
+          (root/'SHA256SUMS.txt').write_text(''.join(lines), encoding='utf-8')
+          PY
+      - name: Publish release after every platform passes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" release/*.zip release/SHA256SUMS.txt --verify-tag --title "Codex Fleet Configurator $RELEASE_TAG" --notes-file docs/RELEASE_NOTES.md
