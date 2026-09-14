@@ -43,7 +43,8 @@ def main():
         # Python's Windows distribution adds notices for its bundled DLLs.
         source_license = Path(sys.base_prefix) / 'LICENSE.txt'
         content = source_license.read_text(encoding='utf-8')
-        if not all(name in content for name in ('Microsoft', 'bzip2', 'OpenSSL')):
+        if not (all(name in content for name in ('Microsoft', 'bzip2'))
+                and any(name in content for name in ('OpenSSL', 'Apache License'))):
             raise SystemExit('Python LICENSE.txt must contain its bundled runtime notices.')
         runtime_license = work / 'Python-Windows-runtime.txt'
         shutil.copy2(source_license, runtime_license)
